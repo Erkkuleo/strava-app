@@ -1,5 +1,5 @@
 const express = require("express");
-const { getStats, clearActivities } = require("./db");
+const { getStats, clearActivities, saveOffset } = require("./db");
 const { runFetch } = require("./cron");
 
 const router = express.Router();
@@ -16,7 +16,8 @@ router.get("/stats", (_req, res) => {
 
 /**
  * POST /api/admin/reset
- * Clears the database and re-runs the baseline so the counter restarts from 0.
+ * Saves the current total as an offset, clears activity data, then re-baselines.
+ * The counter resumes from the saved total so it never drops to 0.
  * Requires ADMIN_SECRET env var passed as X-Admin-Secret header.
  */
 router.post("/admin/reset", (req, res) => {
@@ -25,9 +26,16 @@ router.post("/admin/reset", (req, res) => {
     return res.status(401).json({ error: "Unauthorized. Set ADMIN_SECRET env var and pass it as X-Admin-Secret header." });
   }
 
+  const { grandTotalKm } = getStats();
+  saveOffset(grandTotalKm);
   clearActivities();
   runFetch(true);
-  res.json({ message: "Database cleared. Existing activities baselined at 0 km. Counter starts fresh." });
+
+  res.json({
+    message: "Database cleared and re-baselined.",
+    savedTotal: grandTotalKm,
+    note: "Counter resumes from saved total. New activities will be added on top.",
+  });
 });
 
 module.exports = router;
