@@ -1,49 +1,63 @@
 const cron = require("node-cron");
-const { getAthletes, updateAthleteTokens } = require("./athleteStore");
-const { refreshAthleteToken } = require("./stravaAuth");
-const { fetchAthleteActivities } = require("./stravaClub");
-const { upsertAthleteStats } = require("./db");
+const { fetchClubActivities } = require("./stravaClub");
+const { isActivitySeen, recordActivity, hasAnyActivities } = require("./db");
 
-// Fetch all activities since March 6, 2026 (challenge start)
-const START_TIMESTAMP = Math.floor(new Date("2026-03-06T00:00:00Z").getTime() / 1000);
+function fingerprint(activity) {
+  const first = activity.athlete?.firstname || "";
+  const last = activity.athlete?.lastname || "";
+  const dist = Math.round(activity.distance || 0);
+  const elapsed = activity.elapsed_time || 0;
+  const type = activity.sport_type || activity.type || "unknown";
+  return `${first}_${last}_${dist}_${elapsed}_${type}`;
+}
 
-async function runDailyFetch() {
-  console.log("[Cron] Starting fetch...");
-  const athletes = getAthletes();
-
-  if (athletes.length === 0) {
-    console.log("[Cron] No athletes connected yet. Share /api/auth/login with club members.");
+// baseline=true: marks activities as seen with 0 km (used on first run / reset)
+async function runFetch(baseline = false) {
+  const clubId = process.env.STRAVA_CLUB_ID;
+  if (!clubId) {
+    console.error("[Cron] STRAVA_CLUB_ID not set.");
     return;
   }
 
-  for (const athlete of athletes) {
-    try {
-      let accessToken = athlete.access_token;
-      if (!athlete.expires_at || Date.now() / 1000 > athlete.expires_at - 60) {
-        const refreshed = await refreshAthleteToken(athlete.refresh_token);
-        accessToken = refreshed.access_token;
-        updateAthleteTokens(athlete.id, refreshed.access_token, refreshed.refresh_token, refreshed.expires_at);
+  console.log(`[Cron] Fetching club activities${baseline ? " (baseline)" : ""}...`);
+  try {
+    const activities = await fetchClubActivities(clubId);
+    let newCount = 0;
+
+    for (const activity of activities) {
+      const fp = fingerprint(activity);
+      if (!isActivitySeen(fp)) {
+        const km = baseline ? 0 : (activity.distance || 0) / 1000;
+        const athleteName = `${activity.athlete?.firstname || "?"} ${activity.athlete?.lastname || "?"}`;
+        recordActivity(fp, athleteName, km);
+        newCount++;
       }
-
-      const activities = await fetchAthleteActivities(accessToken, START_TIMESTAMP);
-      const totalKm = activities.reduce((sum, a) => sum + (a.distance || 0) / 1000, 0);
-      const name = `${athlete.firstname} ${athlete.lastname}`;
-
-      upsertAthleteStats(athlete.id, name, totalKm, activities.length);
-      console.log(`[Cron] ${name}: ${Math.round(totalKm * 100) / 100} km (${activities.length} activities)`);
-    } catch (err) {
-      console.error(`[Cron] Failed for athlete ${athlete.id}:`, err.message);
     }
-  }
 
-  console.log("[Cron] Fetch complete.");
+    console.log(`[Cron] Done. ${newCount} activities ${baseline ? "baselined at 0 km" : "recorded"} out of ${activities.length} fetched.`);
+  } catch (err) {
+    console.error("[Cron] Failed:", err.message);
+  }
+}
+
+async function runCycle() {
+  // 1. Count any new activities from existing members
+  await runFetch(false);
+  // 2. Baseline anything still unseen — zeros out old activities from members who just joined
+  await runFetch(true);
 }
 
 function startCron() {
-  // Run at 17:00 every day
-  cron.schedule("0 17 * * *", runDailyFetch);
-  console.log("[Cron] Scheduled daily fetch at 17:00.");
-  runDailyFetch();
+  // Run full cycle every 30 minutes
+  cron.schedule("*/30 * * * *", runCycle);
+  console.log("[Cron] Scheduled fetch+baseline cycle every 30 minutes.");
+
+  if (!hasAnyActivities()) {
+    console.log("[Cron] Fresh database — baselining existing activities at 0 km...");
+    runFetch(true);
+  } else {
+    runCycle();
+  }
 }
 
-module.exports = { startCron, runDailyFetch };
+module.exports = { startCron, runFetch };
