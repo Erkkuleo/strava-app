@@ -2,6 +2,7 @@ const express = require("express");
 const { fetchClubActivities, fetchClubInfo, aggregateActivities, fetchAthleteActivities } = require("./stravaClub");
 const { exchangeCode, refreshAthleteToken, getAuthUrl } = require("./stravaAuth");
 const { saveAthlete, updateAthleteTokens, getAthletes } = require("./athleteStore");
+const { getStats } = require("./db");
 
 const router = express.Router();
 
@@ -247,6 +248,16 @@ router.get("/km", async (req, res) => {
     grandTotalKm: Math.round(grandTotalKm * 100) / 100,
     leaderboard: results,
   });
+});
+
+/**
+ * GET /api/stats
+ * Returns aggregated km totals from the database (populated by the daily cron job).
+ * Used by the frontend.
+ */
+router.get("/stats", (_req, res) => {
+  const stats = getStats();
+  res.json({ since: "2026-03-01", ...stats });
 });
 
 function handleError(err, res) {

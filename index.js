@@ -1,13 +1,16 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
 const routes = require("./routes");
+const { startCron } = require("./cron");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
 
 // Health check
 app.get("/", (req, res) => {
@@ -33,4 +36,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Strava Club API running on http://localhost:${PORT}`);
   console.log(`Club ID from env: ${process.env.STRAVA_CLUB_ID || "(not set)"}`);
+  startCron();
 });

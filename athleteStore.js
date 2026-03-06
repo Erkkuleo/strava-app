@@ -1,7 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 
-const STORE_PATH = path.join(__dirname, "athletes.json");
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
+fs.mkdirSync(DATA_DIR, { recursive: true });
+const STORE_PATH = path.join(DATA_DIR, "athletes.json");
 
 function load() {
   if (!fs.existsSync(STORE_PATH)) return {};
