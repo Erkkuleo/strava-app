@@ -126,4 +126,29 @@ function round2(n) {
   return Math.round(n * 100) / 100;
 }
 
-module.exports = { fetchClubActivities, fetchClubInfo, aggregateActivities };
+/**
+ * Fetches all activities for a single athlete after a given Unix timestamp.
+ * Paginates until Strava returns an empty page.
+ */
+async function fetchAthleteActivities(accessToken, afterTimestamp) {
+  const activities = [];
+  let page = 1;
+
+  while (true) {
+    const response = await axios.get(`${STRAVA_API}/athlete/activities`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      params: { after: afterTimestamp, per_page: 200, page },
+    });
+
+    const batch = response.data;
+    if (!batch || batch.length === 0) break;
+    activities.push(...batch);
+    console.log(`[Athlete] Page ${page}: fetched ${batch.length} activities`);
+    if (batch.length < 200) break;
+    page++;
+  }
+
+  return activities;
+}
+
+module.exports = { fetchClubActivities, fetchClubInfo, aggregateActivities, fetchAthleteActivities };
