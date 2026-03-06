@@ -8,66 +8,42 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 const db = new Database(path.join(DATA_DIR, "stats.db"));
 
 db.exec(`
-  CREATE TABLE IF NOT EXISTS athlete_stats (
-    athlete_id INTEGER PRIMARY KEY,
-    athlete_name TEXT NOT NULL,
-    total_km REAL DEFAULT 0,
-    activities_count INTEGER DEFAULT 0,
-    last_updated TEXT
-  );
-
-  CREATE TABLE IF NOT EXISTS snapshots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    athlete_id INTEGER,
+  CREATE TABLE IF NOT EXISTS seen_activities (
+    fingerprint TEXT PRIMARY KEY,
     athlete_name TEXT,
-    snapshot_date TEXT,
-    total_km REAL,
-    activities_count INTEGER,
-    UNIQUE(athlete_id, snapshot_date)
+    km REAL,
+    first_seen TEXT
   );
 `);
 
-function upsertAthleteStats(athleteId, athleteName, totalKm, activitiesCount) {
-  const now = new Date().toISOString();
-  db.prepare(`
-    INSERT INTO athlete_stats (athlete_id, athlete_name, total_km, activities_count, last_updated)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(athlete_id) DO UPDATE SET
-      athlete_name = excluded.athlete_name,
-      total_km = excluded.total_km,
-      activities_count = excluded.activities_count,
-      last_updated = excluded.last_updated
-  `).run(athleteId, athleteName, totalKm, activitiesCount, now);
+function isActivitySeen(fingerprint) {
+  return !!db.prepare("SELECT 1 FROM seen_activities WHERE fingerprint = ?").get(fingerprint);
 }
 
-function saveSnapshot(athleteId, athleteName, totalKm, activitiesCount) {
-  const date = new Date().toISOString().split("T")[0];
+function recordActivity(fingerprint, athleteName, km) {
+  const now = new Date().toISOString();
   db.prepare(`
-    INSERT INTO snapshots (athlete_id, athlete_name, snapshot_date, total_km, activities_count)
-    VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(athlete_id, snapshot_date) DO UPDATE SET
-      total_km = excluded.total_km,
-      activities_count = excluded.activities_count
-  `).run(athleteId, athleteName, date, totalKm, activitiesCount);
+    INSERT OR IGNORE INTO seen_activities (fingerprint, athlete_name, km, first_seen)
+    VALUES (?, ?, ?, ?)
+  `).run(fingerprint, athleteName, km, now);
 }
 
 function getStats() {
-  const athletes = db.prepare("SELECT * FROM athlete_stats ORDER BY total_km DESC").all();
-  const grandTotal = athletes.reduce((sum, a) => sum + a.total_km, 0);
-  const lastUpdated = athletes.length > 0
-    ? athletes.reduce((latest, a) => (!latest || a.last_updated > latest ? a.last_updated : latest), null)
-    : null;
+  const rows = db.prepare(
+    "SELECT athlete_name, SUM(km) as total_km, COUNT(*) as activities FROM seen_activities GROUP BY athlete_name ORDER BY total_km DESC"
+  ).all();
+  const grandTotal = rows.reduce((sum, r) => sum + r.total_km, 0);
+  const lastUpdatedRow = db.prepare("SELECT MAX(first_seen) as last_updated FROM seen_activities").get();
 
   return {
     grandTotalKm: Math.round(grandTotal * 100) / 100,
-    lastUpdated,
-    athletes: athletes.map((a) => ({
-      id: a.athlete_id,
-      name: a.athlete_name,
-      totalKm: Math.round(a.total_km * 100) / 100,
-      activities: a.activities_count,
+    lastUpdated: lastUpdatedRow?.last_updated || null,
+    athletes: rows.map((r) => ({
+      name: r.athlete_name,
+      totalKm: Math.round(r.total_km * 100) / 100,
+      activities: r.activities,
     })),
   };
 }
 
-module.exports = { upsertAthleteStats, saveSnapshot, getStats };
+module.exports = { isActivitySeen, recordActivity, getStats };
