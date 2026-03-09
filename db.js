@@ -45,6 +45,10 @@ function saveOffset(km) {
   db.prepare("INSERT OR REPLACE INTO settings (key, value) VALUES ('km_offset', ?)").run(String(km));
 }
 
+function clearOffset() {
+  db.prepare("DELETE FROM settings WHERE key = 'km_offset'").run();
+}
+
 function getOffset() {
   const row = db.prepare("SELECT value FROM settings WHERE key = 'km_offset'").get();
   return row ? parseFloat(row.value) : 0;
@@ -70,4 +74,4 @@ function getStats() {
   };
 }
 
-module.exports = { isActivitySeen, recordActivity, hasAnyActivities, clearActivities, saveOffset, getStats };
+module.exports = { isActivitySeen, recordActivity, hasAnyActivities, clearActivities, saveOffset, clearOffset, getStats };

@@ -1,5 +1,5 @@
 const express = require("express");
-const { getStats, clearActivities, saveOffset } = require("./db");
+const { getStats, clearActivities, saveOffset, clearOffset } = require("./db");
 const { runFetch } = require("./cron");
 
 const router = express.Router();
@@ -36,6 +36,24 @@ router.post("/admin/reset", (req, res) => {
     savedTotal: grandTotalKm,
     note: "Counter resumes from saved total. New activities will be added on top.",
   });
+});
+
+/**
+ * POST /api/admin/reset-all
+ * Wipes everything including the km offset — counter goes back to absolute 0.
+ * Requires ADMIN_SECRET env var passed as X-Admin-Secret header.
+ */
+router.post("/admin/reset-all", (req, res) => {
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret || req.headers["x-admin-secret"] !== secret) {
+    return res.status(401).json({ error: "Unauthorized." });
+  }
+
+  clearOffset();
+  clearActivities();
+  runFetch(true);
+
+  res.json({ message: "Full reset done. Counter is back to 0." });
 });
 
 module.exports = router;
